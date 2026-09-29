@@ -23,7 +23,7 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Invite the Discord bot with the `bot` and `applications.commands` scopes. Give it permission to view/send messages in the control channel and manage the office voice channel. Enable Discord Developer Mode to copy IDs.
+Invite the Discord bot with the `bot` and `applications.commands` scopes. Give it permission to view/send messages and read message history in the control channel, and to manage the office voice channel. Enable Discord Developer Mode to copy IDs.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -50,7 +50,7 @@ source .venv/bin/activate
 python bot.py
 ```
 
-The bot loads all cogs, registers persistent office-button handlers, and synchronizes slash commands. `DISCORD_GUILD_ID` makes command changes appear quickly in that guild; global propagation can take longer.
+The bot loads all cogs, registers persistent office-button handlers, reuses the existing Office panel when it finds one in the 100 most recent control-channel messages, and synchronizes slash commands. `DISCORD_GUILD_ID` makes command changes appear quickly in that guild; global propagation can take longer.
 
 ## Run with the existing systemd service
 

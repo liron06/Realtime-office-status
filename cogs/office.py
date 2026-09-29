@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import discord
@@ -10,6 +11,27 @@ from utils.permissions import has_management_permission
 LOGGER = logging.getLogger(__name__)
 OPEN_CHANNEL_NAME = "🟢 Kantoor: OPEN"
 CLOSED_CHANNEL_NAME = "🔴 Kantoor: GESLOTEN"
+PANEL_TITLE = "🏢 Realtime Kantoor"
+PANEL_DESCRIPTION = "Gebruik de knoppen om de zichtbare kantoorstatus aan te passen."
+PANEL_BUTTON_IDS = {"office_open", "office_closed"}
+PANEL_HISTORY_LIMIT = 100
+
+
+def office_panel_embed() -> discord.Embed:
+    return discord.Embed(title=PANEL_TITLE, description=PANEL_DESCRIPTION)
+
+
+def is_office_panel(message: discord.Message, bot_user_id: int) -> bool:
+    if message.author.id != bot_user_id:
+        return False
+
+    custom_ids = {
+        component.custom_id
+        for row in message.components
+        for component in row.children
+        if getattr(component, "custom_id", None) is not None
+    }
+    return PANEL_BUTTON_IDS.issubset(custom_ids)
 
 
 class OfficeButtons(discord.ui.View):
@@ -73,7 +95,8 @@ class OfficeCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.config: Config = bot.config
-        self._control_message_sent = False
+        self._panel_ready = False
+        self._panel_lock = asyncio.Lock()
         self._view = OfficeButtons(self.config)
 
     async def cog_load(self) -> None:
@@ -81,18 +104,56 @@ class OfficeCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
-        if self._control_message_sent:
+        if self._panel_ready:
             return
-        channel = self.bot.get_channel(self.config.office_control_channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            LOGGER.error(
-                "Office control channel %d is not available in the bot cache",
-                self.config.office_control_channel_id,
-            )
-            return
-        await channel.send("🏢 **Kantoorstatus**", view=OfficeButtons(self.config))
-        self._control_message_sent = True
-        LOGGER.info("Posted office controls in channel %d", channel.id)
+
+        async with self._panel_lock:
+            if self._panel_ready:
+                return
+
+            channel = self.bot.get_channel(self.config.office_control_channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                LOGGER.error(
+                    "Office control channel %d is not available in the bot cache",
+                    self.config.office_control_channel_id,
+                )
+                return
+
+            try:
+                panels = [
+                    message
+                    async for message in channel.history(limit=PANEL_HISTORY_LIMIT)
+                    if self.bot.user is not None and is_office_panel(message, self.bot.user.id)
+                ]
+
+                if panels:
+                    panel = panels[0]
+                    if (
+                        panel.content
+                        or len(panel.embeds) != 1
+                        or panel.embeds[0].title != PANEL_TITLE
+                        or panel.embeds[0].description != PANEL_DESCRIPTION
+                    ):
+                        await panel.edit(content=None, embed=office_panel_embed())
+
+                    for duplicate in panels[1:]:
+                        await duplicate.delete()
+
+                    LOGGER.info(
+                        "Found existing Office panel %d in channel %d; removed %d duplicate(s)",
+                        panel.id,
+                        channel.id,
+                        len(panels) - 1,
+                    )
+                else:
+                    panel = await channel.send(embed=office_panel_embed(), view=self._view)
+                    LOGGER.info("Created new Office panel %d in channel %d", panel.id, channel.id)
+
+                self._panel_ready = True
+            except discord.HTTPException:
+                LOGGER.exception(
+                    "Could not initialize the Office panel in channel %d", channel.id
+                )
 
 
 async def setup(bot: commands.Bot) -> None:

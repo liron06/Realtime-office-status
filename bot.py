@@ -21,6 +21,7 @@ class RealtimeBot(commands.Bot):
     async def setup_hook(self) -> None:
         for extension in EXTENSIONS:
             await self.load_extension(extension)
+            LOGGER.info("Loaded extension %s", extension)
 
         if self.config.discord_guild_id is not None:
             guild = discord.Object(id=self.config.discord_guild_id)
