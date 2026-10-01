@@ -45,6 +45,23 @@ def _required_https_url(name: str) -> str:
     return value
 
 
+def _required_api_url(name: str) -> str:
+    value = _required(name)
+    parsed = urlparse(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigurationError(
+            f"{name} must be an HTTP(S) URL without credentials, a query, or a fragment"
+        )
+    return value.rstrip("/")
+
+
 def _database_path() -> Path:
     configured = (os.getenv("DATABASE_PATH") or "").strip()
     return Path(configured or "data/realtime.db").expanduser()
@@ -64,6 +81,8 @@ class Config:
     congressus_client_secret: str
     congressus_base_url: str
     congressus_redirect_uri: str
+    minecraft_api_url: str
+    minecraft_api_token: str
     database_path: Path = Path("data/realtime.db")
 
     def __post_init__(self) -> None:
@@ -92,5 +111,7 @@ class Config:
             congressus_client_secret=_required("CONGRESSUS_CLIENT_SECRET"),
             congressus_base_url=_required_https_url("CONGRESSUS_BASE_URL").rstrip("/"),
             congressus_redirect_uri=_required_https_url("CONGRESSUS_REDIRECT_URI"),
+            minecraft_api_url=_required_api_url("MINECRAFT_API_URL"),
+            minecraft_api_token=_required("MINECRAFT_API_TOKEN"),
             database_path=_database_path(),
         )

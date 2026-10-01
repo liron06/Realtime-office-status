@@ -94,6 +94,15 @@ class DatabaseService:
         async with self._write_lock:
             return await asyncio.to_thread(self._reset_minecraft_username_sync, discord_user_id)
 
+    async def ensure_minecraft_username_available(
+        self, discord_user_id: int, username: str
+    ) -> None:
+        await asyncio.to_thread(
+            self._ensure_minecraft_username_available_sync,
+            discord_user_id,
+            username,
+        )
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
@@ -275,6 +284,31 @@ class DatabaseService:
             raise
         except sqlite3.Error as error:
             raise StorageError("Could not reset the Minecraft username") from error
+
+    def _ensure_minecraft_username_available_sync(
+        self, discord_user_id: int, username: str
+    ) -> None:
+        try:
+            with closing(self._connect()) as connection:
+                member = connection.execute(
+                    "SELECT 1 FROM minecraft_members WHERE discord_user_id = ?",
+                    (discord_user_id,),
+                ).fetchone()
+                if member is None:
+                    raise MemberNotValidated
+                claimed = connection.execute(
+                    """
+                    SELECT 1 FROM minecraft_members
+                    WHERE minecraft_username = ? COLLATE NOCASE AND discord_user_id != ?
+                    """,
+                    (username, discord_user_id),
+                ).fetchone()
+                if claimed is not None:
+                    raise MinecraftUsernameClaimed
+        except (MemberNotValidated, MinecraftUsernameClaimed):
+            raise
+        except sqlite3.Error as error:
+            raise StorageError("Could not check Minecraft username availability") from error
 
 
 def _member_from_row(row: sqlite3.Row) -> MemberLink:

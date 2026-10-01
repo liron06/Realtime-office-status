@@ -1,3 +1,4 @@
+import json
 import logging
 
 import discord
@@ -13,11 +14,21 @@ from services.database import (
     MinecraftUsernameClaimed,
     StorageError,
 )
-from services.minecraft import MinecraftService, is_valid_minecraft_username
+from services.minecraft import (
+    MinecraftApiError,
+    MinecraftApiTimeout,
+    MinecraftApiUnauthorized,
+    MinecraftApiUnavailable,
+    MinecraftMalformedResponse,
+    MinecraftOperationFailed,
+    MinecraftService,
+    RegistrationSyncFailed,
+    WhitelistChangeFailed,
+    is_valid_minecraft_username,
+)
 from utils.permissions import has_role, minecraft_manager_only
 
 
-NOT_CONFIGURED = "Minecraft server integration has not been configured yet."
 LOGGER = logging.getLogger(__name__)
 
 
@@ -30,22 +41,17 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
     def __init__(self, bot: commands.Bot) -> None:
         self.config: Config = bot.config
         self.database: DatabaseService = bot.database
-        self.service = MinecraftService()
+        self.service = MinecraftService(self.config, self.database)
         congressus_cog = bot.get_cog("CongressusCog")
         if not isinstance(congressus_cog, CongressusCog):
             raise RuntimeError("CongressusCog must be loaded before MinecraftCog")
         self.congressus = congressus_cog.service
 
-    async def _member_placeholder(self, interaction: discord.Interaction, message: str) -> None:
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "This command can only be used by server members.", ephemeral=True
-            )
-            return
-        await interaction.response.send_message(message, ephemeral=True)
+    async def cog_load(self) -> None:
+        await self.service.start()
 
-    async def _management_placeholder(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(await self.service.not_configured(), ephemeral=True)
+    async def cog_unload(self) -> None:
+        await self.service.close()
 
     @app_commands.command(name="validate", description="Validate your Realtime membership for Minecraft")
     async def validate(self, interaction: discord.Interaction) -> None:
@@ -93,51 +99,90 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
                     ephemeral=True,
                 )
                 return
-            member_link = await self.database.register_minecraft_username(
-                interaction.user.id, username
-            )
+            await interaction.response.defer(ephemeral=True)
+            member_link = await self.service.register(interaction.user.id, username)
         except MinecraftUsernameAlreadySet as error:
-            await interaction.response.send_message(
+            await self._send(
+                interaction,
                 f"You already registered `{error.username}`. Bestuur or Servercommissie must reset or change it.",
-                ephemeral=True,
             )
             return
         except MinecraftUsernameClaimed:
-            await interaction.response.send_message(
+            await self._send(
+                interaction,
                 "That Minecraft username is already registered by another member.", ephemeral=True
+            )
+            return
+        except RegistrationSyncFailed as error:
+            LOGGER.warning(
+                "Minecraft registration stored but whitelist sync failed for Discord user %d (%s)",
+                interaction.user.id,
+                type(error.cause).__name__,
+            )
+            await self._send(
+                interaction,
+                f"`{username}` is registered to you, but Minecraft whitelist synchronization failed. An administrator can retry it with `/minecraft whitelist sync`.",
             )
             return
         except StorageError as error:
             await self._storage_error(interaction, error)
             return
 
-        await interaction.response.send_message(
-            f"Minecraft username `{member_link.minecraft_username}` registered. Server whitelisting is not enabled yet.",
-            ephemeral=True,
+        await self._send(
+            interaction,
+            f"Minecraft username `{member_link.minecraft_username}` registered and whitelisted.",
         )
 
     @app_commands.command(name="status", description="Show the Minecraft server status")
     async def status(self, interaction: discord.Interaction) -> None:
-        await self._member_placeholder(interaction, NOT_CONFIGURED)
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This command can only be used by server members.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            payload = await self.service.api.status()
+        except MinecraftApiError as error:
+            await self._api_error(interaction, error)
+            return
+        await self._send(interaction, _format_payload("Minecraft server status", payload))
 
     @app_commands.command(name="players", description="Show the online Minecraft players")
     async def players(self, interaction: discord.Interaction) -> None:
-        await self._member_placeholder(interaction, NOT_CONFIGURED)
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "This command can only be used by server members.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            payload = await self.service.api.players()
+        except MinecraftApiError as error:
+            await self._api_error(interaction, error)
+            return
+        await self._send(interaction, _format_payload("Online Minecraft players", payload))
 
     @app_commands.command(name="start", description="Start the Minecraft server")
     @minecraft_manager_only()
     async def start(self, interaction: discord.Interaction) -> None:
-        await self._management_placeholder(interaction)
+        await self._server_operation(
+            interaction, self.service.api.server_start, "Minecraft server start requested."
+        )
 
     @app_commands.command(name="stop", description="Stop the Minecraft server")
     @minecraft_manager_only()
     async def stop(self, interaction: discord.Interaction) -> None:
-        await self._management_placeholder(interaction)
+        await self._server_operation(
+            interaction, self.service.api.server_stop, "Minecraft server stop requested."
+        )
 
     @app_commands.command(name="restart", description="Restart the Minecraft server")
     @minecraft_manager_only()
     async def restart(self, interaction: discord.Interaction) -> None:
-        await self._management_placeholder(interaction)
+        await self._server_operation(
+            interaction, self.service.api.server_restart, "Minecraft server restart requested."
+        )
 
     @whitelist.command(name="show", description="Show a member's stored Minecraft account link")
     @app_commands.describe(member="The Discord member to inspect")
@@ -145,6 +190,7 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
     async def whitelist_show(
         self, interaction: discord.Interaction, member: discord.Member
     ) -> None:
+        await interaction.response.defer(ephemeral=True)
         try:
             member_link = await self.database.get_member(member.id)
         except StorageError as error:
@@ -152,8 +198,8 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
             return
 
         if member_link is None:
-            await interaction.response.send_message(
-                "That member has not completed Congressus validation.", ephemeral=True
+            await self._send(
+                interaction, "That member has not completed Congressus validation."
             )
             return
 
@@ -173,7 +219,7 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
             inline=False,
         )
         embed.add_field(name="Verified at", value=member_link.verified_at, inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @whitelist.command(name="reset", description="Clear a member's Minecraft username")
     @app_commands.describe(member="The Discord member whose username should be cleared")
@@ -181,11 +227,24 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
     async def whitelist_reset(
         self, interaction: discord.Interaction, member: discord.Member
     ) -> None:
+        await interaction.response.defer(ephemeral=True)
         try:
-            changed = await self.database.reset_minecraft_username(member.id)
+            removed_username = await self.service.reset(member.id)
         except MemberNotValidated:
-            await interaction.response.send_message(
-                "That member has not completed Congressus validation.", ephemeral=True
+            await self._send(
+                interaction, "That member has not completed Congressus validation."
+            )
+            return
+        except MinecraftApiError as error:
+            LOGGER.warning(
+                "Minecraft whitelist removal failed before reset for Discord user %d (%s)",
+                member.id,
+                type(error).__name__,
+            )
+            await self._send(
+                interaction,
+                "The username was not reset because it could not be safely removed from the Minecraft whitelist. "
+                f"The stored account link is unchanged. {_api_error_message(error)}",
             )
             return
         except StorageError as error:
@@ -193,11 +252,11 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
             return
 
         message = (
-            f"Cleared the stored Minecraft username for {member.mention}."
-            if changed
+            f"Removed `{removed_username}` from the whitelist and cleared it for {member.mention}."
+            if removed_username
             else f"{member.mention} does not have a Minecraft username registered."
         )
-        await interaction.response.send_message(message, ephemeral=True)
+        await self._send(interaction, message)
 
     @whitelist.command(name="set", description="Set or replace a member's Minecraft username")
     @app_commands.describe(member="The validated Discord member", username="Minecraft Java username")
@@ -214,33 +273,81 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
                 ephemeral=True,
             )
             return
+        await interaction.response.defer(ephemeral=True)
         try:
-            member_link = await self.database.register_minecraft_username(
-                member.id, username, replace=True
-            )
+            member_link = await self.service.set_username(member.id, username)
         except MemberNotValidated:
-            await interaction.response.send_message(
-                "That member has not completed Congressus validation.", ephemeral=True
+            await self._send(
+                interaction, "That member has not completed Congressus validation."
             )
             return
         except MinecraftUsernameClaimed:
-            await interaction.response.send_message(
-                "That Minecraft username is already registered by another member.", ephemeral=True
+            await self._send(
+                interaction, "That Minecraft username is already registered by another member."
+            )
+            return
+        except WhitelistChangeFailed as error:
+            LOGGER.warning(
+                "Minecraft whitelist change failed for Discord user %d (%s, rollback_failed=%s)",
+                member.id,
+                type(error.cause).__name__,
+                error.rollback_failed,
+            )
+            message = (
+                "The username change failed and the old database mapping was kept. Restoring the old whitelist entry also failed; an administrator should run whitelist sync after the API recovers."
+                if error.rollback_failed
+                else "The username change failed and the database mapping was not changed. Any previous whitelist entry was preserved or restored."
+            )
+            await self._send(interaction, message)
+            return
+        except MinecraftApiError as error:
+            await self._send(
+                interaction,
+                f"The username change was not completed and the database mapping is unchanged. {_api_error_message(error)}",
             )
             return
         except StorageError as error:
             await self._storage_error(interaction, error)
             return
 
-        await interaction.response.send_message(
+        await self._send(
+            interaction,
             f"Set {member.mention}'s Minecraft username to `{member_link.minecraft_username}`.",
-            ephemeral=True,
         )
+
+    @whitelist.command(name="sync", description="Ensure a member's username is whitelisted")
+    @app_commands.describe(member="The Discord member to synchronize")
+    @minecraft_manager_only()
+    async def whitelist_sync(
+        self, interaction: discord.Interaction, member: discord.Member
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            username = await self.service.sync(member.id)
+        except MemberNotValidated:
+            await self._send(
+                interaction, "That member has not completed Congressus validation."
+            )
+            return
+        except MinecraftApiError as error:
+            await self._api_error(interaction, error)
+            return
+        except StorageError as error:
+            await self._storage_error(interaction, error)
+            return
+
+        if username is None:
+            await self._send(interaction, "That member has no Minecraft username to synchronize.")
+            return
+        await self._send(interaction, f"Ensured `{username}` is on the Minecraft whitelist.")
 
     @app_commands.command(name="commands", description="Show available Minecraft management commands")
     @minecraft_manager_only()
     async def commands_list(self, interaction: discord.Interaction) -> None:
-        await self._management_placeholder(interaction)
+        await interaction.response.send_message(
+            "Available management commands: start, stop, restart, and whitelist show/reset/set/sync.",
+            ephemeral=True,
+        )
 
     async def _storage_error(
         self, interaction: discord.Interaction, error: StorageError
@@ -248,10 +355,58 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
         LOGGER.error(
             "Minecraft account storage operation failed (%s)", type(error).__name__
         )
-        await interaction.response.send_message(
+        await self._send(
+            interaction,
             "The account database is temporarily unavailable. Please try again later.",
-            ephemeral=True,
         )
+
+    async def _api_error(
+        self, interaction: discord.Interaction, error: MinecraftApiError
+    ) -> None:
+        await self._send(interaction, _api_error_message(error))
+
+    async def _server_operation(
+        self,
+        interaction: discord.Interaction,
+        operation,
+        success_message: str,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await operation()
+        except MinecraftApiError as error:
+            await self._api_error(interaction, error)
+            return
+        await self._send(interaction, success_message)
+
+    @staticmethod
+    async def _send(interaction: discord.Interaction, message: str, **kwargs) -> None:
+        kwargs.setdefault("ephemeral", True)
+        if interaction.response.is_done():
+            await interaction.followup.send(message, **kwargs)
+        else:
+            await interaction.response.send_message(message, **kwargs)
+
+
+def _format_payload(title: str, payload: object) -> str:
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(rendered) > 1750:
+        rendered = rendered[:1747] + "..."
+    return f"**{title}**\n```json\n{rendered}\n```"
+
+
+def _api_error_message(error: MinecraftApiError) -> str:
+    if isinstance(error, MinecraftApiTimeout):
+        return "The Minecraft API timed out. Please try again later."
+    if isinstance(error, MinecraftApiUnavailable):
+        return "The Minecraft API is currently unavailable. Please try again later."
+    if isinstance(error, MinecraftApiUnauthorized):
+        return "Minecraft API authentication is misconfigured. Please contact an administrator."
+    if isinstance(error, MinecraftMalformedResponse):
+        return "The Minecraft API returned an invalid response. Please contact an administrator."
+    if isinstance(error, MinecraftOperationFailed):
+        return "The Minecraft operation failed. Please try again later."
+    return "The Minecraft integration could not complete that request."
 
 
 async def setup(bot: commands.Bot) -> None:

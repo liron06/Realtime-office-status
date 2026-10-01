@@ -1,6 +1,6 @@
 # Realtime Discord bot
 
-An asynchronous `discord.py` bot for the Realtime student association. It provides office-status controls, persistent Congressus membership and Minecraft-account registration, and placeholders for future Minecraft server operations.
+An asynchronous `discord.py` bot for the Realtime student association. It provides office-status controls, persistent Congressus membership and Minecraft-account registration, and Minecraft management through the internal Gaming VPS API.
 
 ## Project structure
 
@@ -10,6 +10,7 @@ config.py               Environment loading and validation
 cogs/                   Discord commands, views, and events
 services/               Async integration and persistence boundaries
   database.py           SQLite member/account persistence
+  minecraft.py          Authenticated Gaming VPS API client and consistency workflows
 utils/permissions.py    Reusable administrator/role-ID checks
 ```
 
@@ -40,9 +41,11 @@ Invite the Discord bot with the `bot` and `applications.commands` scopes. Give i
 | `CONGRESSUS_CLIENT_SECRET` | yes | Congressus OAuth client secret |
 | `CONGRESSUS_BASE_URL` | yes | Congressus base URL, normally `https://www.sv-realtime.nl` |
 | `CONGRESSUS_REDIRECT_URI` | yes | Public OAuth callback URL registered with Congressus |
+| `MINECRAFT_API_URL` | yes | Internal Gaming VPS API URL, normally `http://10.77.0.2:8081` |
+| `MINECRAFT_API_TOKEN` | yes | Bearer token for the Gaming VPS API |
 | `DATABASE_PATH` | no | SQLite path; defaults to `data/realtime.db` |
 
-The callback server listens only on `127.0.0.1:8090`. The public `CONGRESSUS_REDIRECT_URI` must therefore be forwarded by the existing HTTPS reverse proxy to `http://127.0.0.1:8090/congressus/callback`. Configure the proxy not to log callback query strings because they contain short-lived OAuth credentials. `.env` is excluded by `.gitignore`.
+The callback server listens only on `127.0.0.1:8090`. The public `CONGRESSUS_REDIRECT_URI` must therefore be forwarded by the existing HTTPS reverse proxy to `http://127.0.0.1:8090/congressus/callback`. Configure the proxy not to log callback query strings because they contain short-lived OAuth credentials. The Minecraft API token must exist only in the production environment. `.env` is excluded by `.gitignore`.
 
 ## Permissions
 
@@ -52,12 +55,15 @@ Members with `BOARD_ROLE_ID` may manage both Office and Minecraft. `OFFICE_MANAG
 
 ## Minecraft account commands
 
-- `/minecraft register <username>` stores the validated member's first Minecraft Java username. Members cannot replace it themselves.
+- `/minecraft register <username>` stores the validated member's first Minecraft Java username and ensures it is whitelisted. If the API is temporarily unavailable, the stored ownership remains and a manager can retry synchronization.
 - `/minecraft whitelist show <member>` shows the stored account link to Minecraft managers.
-- `/minecraft whitelist reset <member>` clears only the Minecraft username so the member can register again.
-- `/minecraft whitelist set <member> <username>` sets or replaces a validated member's username.
+- `/minecraft whitelist reset <member>` removes the current server whitelist entry before clearing the stored username. Congressus verification and the Discord role remain.
+- `/minecraft whitelist set <member> <username>` safely replaces a validated member's username, including rollback when adding the new whitelist entry fails.
+- `/minecraft whitelist sync <member>` idempotently ensures the stored username is present on the server whitelist without changing SQLite.
+- `/minecraft status` and `/minecraft players` query the internal API for server information.
+- `/minecraft start`, `stop`, and `restart` call the corresponding server lifecycle endpoints and remain management-only.
 
-Usernames must be 3–16 ASCII letters, numbers, or underscores and are unique without regard to letter casing. These commands only store intended account links; they do not contact or modify a Minecraft server.
+Usernames must be 3–16 ASCII letters, numbers, or underscores and are unique without regard to letter casing. No Discord command exposes arbitrary shell, Docker, RCON, or console execution.
 
 ## SQLite storage
 
@@ -70,7 +76,7 @@ source .venv/bin/activate
 python bot.py
 ```
 
-The bot initializes SQLite, loads all cogs, starts the local Congressus callback server, registers persistent office-button handlers, reuses the existing Office panel when it finds one in the 100 most recent control-channel messages, and synchronizes slash commands to `DISCORD_GUILD_ID`.
+The bot initializes SQLite, loads all cogs, starts the local Congressus callback server, creates the Minecraft API HTTP client, registers persistent office-button handlers, reuses the existing Office panel when it finds one in the 100 most recent control-channel messages, and synchronizes slash commands to `DISCORD_GUILD_ID`. It does not contact the Minecraft API during startup, so gust or Minecraft may be offline.
 
 ## Run with the existing systemd service
 
