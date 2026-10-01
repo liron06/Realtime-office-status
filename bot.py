@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import Config, ConfigurationError
+from services.database import DatabaseService
 from utils.permissions import ManagementPermissionError
 
 
@@ -17,8 +18,10 @@ class RealtimeBot(commands.Bot):
     def __init__(self, config: Config) -> None:
         super().__init__(command_prefix="!", intents=discord.Intents.default())
         self.config = config
+        self.database = DatabaseService(config.database_path)
 
     async def setup_hook(self) -> None:
+        await self.database.initialize()
         for extension in EXTENSIONS:
             await self.load_extension(extension)
             LOGGER.info("Loaded extension %s", extension)

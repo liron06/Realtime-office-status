@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -44,6 +45,11 @@ def _required_https_url(name: str) -> str:
     return value
 
 
+def _database_path() -> Path:
+    configured = (os.getenv("DATABASE_PATH") or "").strip()
+    return Path(configured or "data/realtime.db").expanduser()
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     discord_token: str
@@ -51,17 +57,20 @@ class Config:
     office_control_channel_id: int
     office_manager_role_id: int
     minecraft_manager_role_id: int
+    board_role_id: int
     discord_guild_id: int
     minecraft_role_id: int
     congressus_client_id: str
     congressus_client_secret: str
     congressus_base_url: str
     congressus_redirect_uri: str
+    database_path: Path = Path("data/realtime.db")
 
     def __post_init__(self) -> None:
         if self.minecraft_role_id in {
             self.office_manager_role_id,
             self.minecraft_manager_role_id,
+            self.board_role_id,
         }:
             raise ConfigurationError(
                 "MINECRAFT_ROLE_ID must be different from all management role IDs"
@@ -77,9 +86,11 @@ class Config:
             office_control_channel_id=_required_id("OFFICE_CONTROL_CHANNEL_ID"),
             office_manager_role_id=_required_id("OFFICE_MANAGER_ROLE_ID"),
             minecraft_manager_role_id=_required_id("MINECRAFT_MANAGER_ROLE_ID"),
+            board_role_id=_required_id("BOARD_ROLE_ID"),
             minecraft_role_id=_required_id("MINECRAFT_ROLE_ID"),
             congressus_client_id=_required("CONGRESSUS_CLIENT_ID"),
             congressus_client_secret=_required("CONGRESSUS_CLIENT_SECRET"),
             congressus_base_url=_required_https_url("CONGRESSUS_BASE_URL").rstrip("/"),
             congressus_redirect_uri=_required_https_url("CONGRESSUS_REDIRECT_URI"),
+            database_path=_database_path(),
         )

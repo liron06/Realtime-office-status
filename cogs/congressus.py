@@ -7,7 +7,7 @@ class CongressusCog(commands.Cog):
     """Owns the Congressus OAuth service lifecycle."""
 
     def __init__(self, bot: commands.Bot) -> None:
-        self.service = CongressusService(bot, bot.config)
+        self.service = CongressusService(bot, bot.config, bot.database)
 
     async def cog_load(self) -> None:
         await self.service.start()

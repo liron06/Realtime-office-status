@@ -45,7 +45,11 @@ class OfficeButtons(discord.ui.View):
         channel_name: str,
         confirmation: str,
     ) -> None:
-        if not has_management_permission(interaction, self.config.office_manager_role_id):
+        if not has_management_permission(
+            interaction,
+            self.config.board_role_id,
+            self.config.office_manager_role_id,
+        ):
             await interaction.response.send_message(
                 "You do not have permission to manage the office status.", ephemeral=True
             )

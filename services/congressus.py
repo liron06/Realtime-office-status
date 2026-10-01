@@ -10,6 +10,12 @@ import discord
 from aiohttp import web
 
 from config import Config
+from services.database import (
+    CongressusAccountAlreadyLinked,
+    DatabaseService,
+    DiscordAccountAlreadyLinked,
+    StorageError,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -31,9 +37,15 @@ class CongressusUpstreamError(Exception):
 
 
 class CongressusService:
-    def __init__(self, bot: discord.Client, config: Config) -> None:
+    def __init__(
+        self,
+        bot: discord.Client,
+        config: Config,
+        database: DatabaseService,
+    ) -> None:
         self.bot = bot
         self.config = config
+        self.database = database
         self._states: dict[str, PendingAuthorization] = {}
         self._state_lock = asyncio.Lock()
         self._session: aiohttp.ClientSession | None = None
@@ -176,6 +188,57 @@ class CongressusService:
                 status=403,
             )
 
+        congressus_user_id = _required_identifier(userinfo.get("user_id"))
+        if congressus_user_id is None:
+            LOGGER.error(
+                "Congressus userinfo did not contain a usable user ID for Discord user %d",
+                pending.discord_user_id,
+            )
+            return self._html_response(
+                "Validation failed",
+                "Congressus returned incomplete membership information. Please try again later.",
+                status=502,
+            )
+
+        try:
+            await self.database.link_member(
+                pending.discord_user_id,
+                congressus_user_id,
+                _optional_profile_value(userinfo.get("username")),
+                _optional_profile_value(userinfo.get("name")),
+            )
+        except DiscordAccountAlreadyLinked:
+            LOGGER.warning(
+                "Rejected a different Congressus account for Discord user %d",
+                pending.discord_user_id,
+            )
+            return self._html_response(
+                "Account already linked",
+                "This Discord account is already linked to another Congressus account. Contact an administrator if this is unexpected.",
+                status=409,
+            )
+        except CongressusAccountAlreadyLinked:
+            LOGGER.warning(
+                "Rejected an already-linked Congressus account for Discord user %d",
+                pending.discord_user_id,
+            )
+            return self._html_response(
+                "Account already linked",
+                "This Congressus account is already linked to another Discord account. Contact an administrator if this is unexpected.",
+                status=409,
+            )
+        except StorageError as error:
+            LOGGER.error(
+                "Could not persist Congressus validation for Discord user %d (%s)",
+                pending.discord_user_id,
+                type(error).__name__,
+            )
+            return self._html_response(
+                "Validation failed",
+                "Your membership was verified, but the account link could not be saved. Please try again later.",
+                status=500,
+            )
+
         if not await self._assign_validated_role(pending.discord_user_id):
             return self._html_response(
                 "Validation failed",
@@ -305,3 +368,17 @@ class CongressusService:
             content_type="text/html",
             headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
         )
+
+
+def _required_identifier(value: object) -> str | None:
+    if not isinstance(value, (str, int)) or isinstance(value, bool):
+        return None
+    identifier = str(value).strip()
+    return identifier if identifier else None
+
+
+def _optional_profile_value(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned[:255] if cleaned else None
