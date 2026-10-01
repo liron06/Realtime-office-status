@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.congressus import CongressusCog
 from config import Config
 from services.minecraft import MinecraftService
 from utils.permissions import minecraft_manager_only
@@ -14,6 +15,10 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
     def __init__(self, bot: commands.Bot) -> None:
         self.config: Config = bot.config
         self.service = MinecraftService()
+        congressus_cog = bot.get_cog("CongressusCog")
+        if not isinstance(congressus_cog, CongressusCog):
+            raise RuntimeError("CongressusCog must be loaded before MinecraftCog")
+        self.congressus = congressus_cog.service
 
     async def _member_placeholder(self, interaction: discord.Interaction, message: str) -> None:
         if interaction.guild is None:
@@ -28,8 +33,25 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
 
     @app_commands.command(name="validate", description="Validate your Realtime membership for Minecraft")
     async def validate(self, interaction: discord.Interaction) -> None:
-        await self._member_placeholder(
-            interaction, "Congressus verification has not been configured yet."
+        if interaction.guild_id != self.config.discord_guild_id:
+            await interaction.response.send_message(
+                "This command can only be used in the Realtime Discord server.", ephemeral=True
+            )
+            return
+
+        authorization_url = await self.congressus.create_authorization_url(interaction.user.id)
+        view = discord.ui.View()
+        view.add_item(
+            discord.ui.Button(
+                label="Validate with Congressus",
+                style=discord.ButtonStyle.link,
+                url=authorization_url,
+            )
+        )
+        await interaction.response.send_message(
+            "Use Congressus to verify your active Realtime membership.",
+            view=view,
+            ephemeral=True,
         )
 
     @app_commands.command(name="status", description="Show the Minecraft server status")

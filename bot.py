@@ -10,7 +10,7 @@ from utils.permissions import ManagementPermissionError
 
 
 LOGGER = logging.getLogger(__name__)
-EXTENSIONS = ("cogs.office", "cogs.minecraft", "cogs.congressus")
+EXTENSIONS = ("cogs.office", "cogs.congressus", "cogs.minecraft")
 
 
 class RealtimeBot(commands.Bot):
@@ -23,14 +23,10 @@ class RealtimeBot(commands.Bot):
             await self.load_extension(extension)
             LOGGER.info("Loaded extension %s", extension)
 
-        if self.config.discord_guild_id is not None:
-            guild = discord.Object(id=self.config.discord_guild_id)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            LOGGER.info("Synced %d application commands to the configured guild", len(synced))
-        else:
-            synced = await self.tree.sync()
-            LOGGER.info("Synced %d global application commands", len(synced))
+        guild = discord.Object(id=self.config.discord_guild_id)
+        self.tree.copy_global_to(guild=guild)
+        synced = await self.tree.sync(guild=guild)
+        LOGGER.info("Synced %d application commands to the configured guild", len(synced))
 
 
 async def send_interaction_error(interaction: discord.Interaction, message: str) -> None:

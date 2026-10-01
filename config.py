@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -26,17 +27,21 @@ def _required_id(name: str) -> int:
     return parsed
 
 
-def _optional_id(name: str) -> int | None:
-    value = os.getenv(name)
-    if value is None or not value.strip():
-        return None
-    try:
-        parsed = int(value)
-    except ValueError as error:
-        raise ConfigurationError(f"{name} must be a Discord ID") from error
-    if parsed <= 0:
-        raise ConfigurationError(f"{name} must be a positive Discord ID")
-    return parsed
+def _required_https_url(name: str) -> str:
+    value = _required(name)
+    parsed = urlparse(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigurationError(
+            f"{name} must be an HTTPS URL without credentials, a query, or a fragment"
+        )
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,18 +51,35 @@ class Config:
     office_control_channel_id: int
     office_manager_role_id: int
     minecraft_manager_role_id: int
-    discord_guild_id: int | None = None
-    minecraft_role_id: int | None = None
+    discord_guild_id: int
+    minecraft_role_id: int
+    congressus_client_id: str
+    congressus_client_secret: str
+    congressus_base_url: str
+    congressus_redirect_uri: str
+
+    def __post_init__(self) -> None:
+        if self.minecraft_role_id in {
+            self.office_manager_role_id,
+            self.minecraft_manager_role_id,
+        }:
+            raise ConfigurationError(
+                "MINECRAFT_ROLE_ID must be different from all management role IDs"
+            )
 
     @classmethod
     def from_environment(cls) -> "Config":
         load_dotenv()
         return cls(
             discord_token=_required("DISCORD_TOKEN"),
-            discord_guild_id=_optional_id("DISCORD_GUILD_ID"),
+            discord_guild_id=_required_id("DISCORD_GUILD_ID"),
             office_voice_channel_id=_required_id("OFFICE_VOICE_CHANNEL_ID"),
             office_control_channel_id=_required_id("OFFICE_CONTROL_CHANNEL_ID"),
             office_manager_role_id=_required_id("OFFICE_MANAGER_ROLE_ID"),
             minecraft_manager_role_id=_required_id("MINECRAFT_MANAGER_ROLE_ID"),
-            minecraft_role_id=_optional_id("MINECRAFT_ROLE_ID"),
+            minecraft_role_id=_required_id("MINECRAFT_ROLE_ID"),
+            congressus_client_id=_required("CONGRESSUS_CLIENT_ID"),
+            congressus_client_secret=_required("CONGRESSUS_CLIENT_SECRET"),
+            congressus_base_url=_required_https_url("CONGRESSUS_BASE_URL").rstrip("/"),
+            congressus_redirect_uri=_required_https_url("CONGRESSUS_REDIRECT_URI"),
         )
