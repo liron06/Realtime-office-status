@@ -59,7 +59,7 @@ After OAuth succeeds, the bot sends the member a DM containing the Minecraft-acc
 ## Minecraft account commands
 
 - `/minecraft aanmelden` is the primary member flow. It skips completed steps and shows the configured server address to fully registered members.
-- `/minecraft validate` and `/minecraft register <username>` remain available as legacy entry points and reuse the same onboarding and registration logic.
+- `/minecraft aanmelden` hervat automatisch bij de juiste stap wanneer de Congressus-verificatie of Minecraft-koppeling al is voltooid.
 - `/minecraft whitelist show <member>` shows the stored account link to Minecraft managers.
 - `/minecraft whitelist reset <member>` removes the current server whitelist entry before clearing the stored username. Congressus verification and the Discord role remain.
 - `/minecraft whitelist set <member> <username>` safely replaces a validated member's username, including rollback when adding the new whitelist entry fails.

@@ -86,10 +86,14 @@ class MinecraftAccountLinkView(discord.ui.View):
         )
 
 
-class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description="Minecraft tools"):
+class MinecraftCog(
+    commands.GroupCog,
+    group_name="minecraft",
+    group_description="Realtime Minecraft-server",
+):
     whitelist = app_commands.Group(
         name="whitelist",
-        description="Manage validated Minecraft member accounts",
+        description="Beheer gekoppelde Minecraft-accounts",
     )
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -111,13 +115,9 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
         await self.service.close()
 
     @app_commands.command(
-        name="aanmelden", description="Meld je aan voor de Realtime Minecraft-server"
+        name="aanmelden", description="Aanmelden voor de Realtime Minecraft-server"
     )
     async def aanmelden(self, interaction: discord.Interaction) -> None:
-        await self.show_onboarding(interaction)
-
-    @app_commands.command(name="validate", description="Verifieer je lidmaatschap (legacy)")
-    async def validate(self, interaction: discord.Interaction) -> None:
         await self.show_onboarding(interaction)
 
     async def show_onboarding(self, interaction: discord.Interaction) -> None:
@@ -175,16 +175,6 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
             view=MinecraftAccountLinkView(self, discord_user_id),
         )
 
-    @app_commands.command(name="register", description="Koppel je Minecraft-gebruikersnaam (legacy)")
-    @app_commands.describe(username="Je Minecraft Java-gebruikersnaam")
-    async def register(self, interaction: discord.Interaction, username: str) -> None:
-        if interaction.guild_id != self.config.discord_guild_id:
-            await interaction.response.send_message(
-                "Dit commando werkt alleen in de Realtime Discord-server.", ephemeral=True
-            )
-            return
-        await self.register_from_interaction(interaction, username)
-
     async def register_from_interaction(
         self, interaction: discord.Interaction, username: str
     ) -> None:
@@ -234,7 +224,9 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
 
         await self._send(interaction, embed=self._success_embed(member_link.minecraft_username))
 
-    @app_commands.command(name="status", description="Bekijk de Minecraft-serverstatus")
+    @app_commands.command(
+        name="status", description="Bekijk de status van de Minecraft-server"
+    )
     async def status(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -249,7 +241,7 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
             return
         await self._send(interaction, _format_status(payload, self.config.minecraft_server_host))
 
-    @app_commands.command(name="players", description="Bekijk de online Minecraft-spelers")
+    @app_commands.command(name="players", description="Bekijk wie er online is")
     async def players(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None:
             await interaction.response.send_message(
@@ -264,29 +256,29 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
             return
         await self._send(interaction, _format_players(payload))
 
-    @app_commands.command(name="start", description="Start the Minecraft server")
+    @app_commands.command(name="start", description="Start de Minecraft-server")
     @minecraft_manager_only()
     async def start(self, interaction: discord.Interaction) -> None:
         await self._server_operation(
             interaction, self.service.api.server_start, "Minecraft server start requested."
         )
 
-    @app_commands.command(name="stop", description="Stop the Minecraft server")
+    @app_commands.command(name="stop", description="Stop de Minecraft-server")
     @minecraft_manager_only()
     async def stop(self, interaction: discord.Interaction) -> None:
         await self._server_operation(
             interaction, self.service.api.server_stop, "Minecraft server stop requested."
         )
 
-    @app_commands.command(name="restart", description="Restart the Minecraft server")
+    @app_commands.command(name="restart", description="Herstart de Minecraft-server")
     @minecraft_manager_only()
     async def restart(self, interaction: discord.Interaction) -> None:
         await self._server_operation(
             interaction, self.service.api.server_restart, "Minecraft server restart requested."
         )
 
-    @whitelist.command(name="show", description="Show a member's stored Minecraft account link")
-    @app_commands.describe(member="The Discord member to inspect")
+    @whitelist.command(name="show", description="Bekijk het gekoppelde Minecraft-account")
+    @app_commands.describe(member="Het Discord-lid dat je wilt bekijken")
     @minecraft_manager_only()
     async def whitelist_show(
         self, interaction: discord.Interaction, member: discord.Member
@@ -322,8 +314,8 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
         embed.add_field(name="Verified at", value=member_link.verified_at, inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @whitelist.command(name="reset", description="Clear a member's Minecraft username")
-    @app_commands.describe(member="The Discord member whose username should be cleared")
+    @whitelist.command(name="reset", description="Verwijder een gekoppeld Minecraft-account")
+    @app_commands.describe(member="Het Discord-lid waarvan je de koppeling verwijdert")
     @minecraft_manager_only()
     async def whitelist_reset(
         self, interaction: discord.Interaction, member: discord.Member
@@ -359,8 +351,11 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
         )
         await self._send(interaction, message)
 
-    @whitelist.command(name="set", description="Set or replace a member's Minecraft username")
-    @app_commands.describe(member="The validated Discord member", username="Minecraft Java username")
+    @whitelist.command(name="set", description="Stel een Minecraft-account in")
+    @app_commands.describe(
+        member="Het geverifieerde Discord-lid",
+        username="Minecraft Java-gebruikersnaam",
+    )
     @minecraft_manager_only()
     async def whitelist_set(
         self,
@@ -416,8 +411,8 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
             f"Set {member.mention}'s Minecraft username to `{member_link.minecraft_username}`.",
         )
 
-    @whitelist.command(name="sync", description="Ensure a member's username is whitelisted")
-    @app_commands.describe(member="The Discord member to synchronize")
+    @whitelist.command(name="sync", description="Synchroniseer een account met de whitelist")
+    @app_commands.describe(member="Het Discord-lid dat je wilt synchroniseren")
     @minecraft_manager_only()
     async def whitelist_sync(
         self, interaction: discord.Interaction, member: discord.Member
@@ -441,14 +436,6 @@ class MinecraftCog(commands.GroupCog, group_name="minecraft", group_description=
             await self._send(interaction, "That member has no Minecraft username to synchronize.")
             return
         await self._send(interaction, f"Ensured `{username}` is on the Minecraft whitelist.")
-
-    @app_commands.command(name="commands", description="Show available Minecraft management commands")
-    @minecraft_manager_only()
-    async def commands_list(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
-            "Available management commands: start, stop, restart, and whitelist show/reset/set/sync.",
-            ephemeral=True,
-        )
 
     async def _has_validated_role(self, discord_user_id: int) -> bool:
         guild = self.bot.get_guild(self.config.discord_guild_id)

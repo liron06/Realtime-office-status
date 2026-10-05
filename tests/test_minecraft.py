@@ -219,7 +219,12 @@ class MinecraftOnboardingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_new_user_receives_congressus_verification(self):
         interaction = self.interaction()
-        await self.cog.show_onboarding(interaction)
+        command = next(
+            command
+            for command in self.cog.__cog_app_commands_group__.commands
+            if command.name == "aanmelden"
+        )
+        await command.callback(self.cog, interaction)
 
         self.congressus_service.create_authorization_url.assert_awaited_once_with(100)
         _, kwargs = interaction.response.sent
@@ -278,6 +283,35 @@ class MinecraftOnboardingTests(unittest.IsolatedAsyncioTestCase):
             interaction, "PlayerOne"
         )
         self.assertFalse(is_valid_minecraft_username("bad-name"))
+
+    async def test_aanmelden_flow_uses_existing_registration_logic(self):
+        await self.database.link_member(100, "congressus-100", "member", "Member")
+        self.cog._has_validated_role = AsyncMock(return_value=True)
+        self.cog.service.register = AsyncMock(
+            return_value=SimpleNamespace(minecraft_username="PlayerOne")
+        )
+
+        aanmelden_interaction = self.interaction()
+        command = next(
+            command
+            for command in self.cog.__cog_app_commands_group__.commands
+            if command.name == "aanmelden"
+        )
+        await command.callback(self.cog, aanmelden_interaction)
+        _, kwargs = aanmelden_interaction.response.sent
+        view = kwargs["view"]
+
+        button_interaction = self.interaction()
+        await view.link_account.callback(button_interaction)
+        modal = button_interaction.response.modal
+        modal.username._value = "PlayerOne"
+
+        submit_interaction = self.interaction()
+        await modal.on_submit(submit_interaction)
+
+        self.cog.service.register.assert_awaited_once_with(100, "PlayerOne")
+        _, success_kwargs = submit_interaction.followup.sent
+        self.assertIn("Klaar om te spelen", success_kwargs["embed"].title)
 
     async def test_oauth_success_callback_is_connected_to_private_prompt(self):
         callback = self.congressus_service.set_verified_callback.call_args.args[0]
@@ -410,15 +444,36 @@ def make_member(*role_ids, administrator=False):
 
 
 class PermissionAndOfficeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_sync_and_lifecycle_permissions(self):
+    def test_public_and_management_command_registration(self):
+        cog = MinecraftCog.__new__(MinecraftCog)
+        root = cog.__cog_app_commands_group__
+        root_commands = {command.name: command for command in root.commands}
+
+        self.assertNotIn("validate", root_commands)
+        self.assertNotIn("register", root_commands)
+        self.assertNotIn("commands", root_commands)
+        self.assertTrue({"aanmelden", "status", "players"}.issubset(root_commands))
+        self.assertTrue({"start", "stop", "restart", "whitelist"}.issubset(root_commands))
+        self.assertEqual(
+            {command.name for command in root_commands["whitelist"].commands},
+            {"show", "set", "reset", "sync"},
+        )
+
+    async def test_every_management_command_retains_server_side_permissions(self):
         config = make_config(Path("unused.db"))
         cog = MinecraftCog.__new__(MinecraftCog)
         root = cog.__cog_app_commands_group__
-        start = next(command for command in root.commands if command.name == "start")
+        root_commands = {command.name: command for command in root.commands}
         whitelist = next(command for command in root.commands if command.name == "whitelist")
-        sync = next(command for command in whitelist.commands if command.name == "sync")
+        management_commands = [
+            root_commands["start"],
+            root_commands["stop"],
+            root_commands["restart"],
+            *whitelist.commands,
+        ]
 
-        for command in (start, sync):
+        for command in management_commands:
+            self.assertTrue(command.checks, command.qualified_name)
             predicate = command.checks[0]
             for interaction in (
                 SimpleNamespace(
@@ -435,13 +490,17 @@ class PermissionAndOfficeTests(unittest.IsolatedAsyncioTestCase):
             ):
                 self.assertTrue(await predicate(interaction))
 
-            with self.assertRaises(ManagementPermissionError):
-                await predicate(
-                    SimpleNamespace(
-                        user=make_member(config.minecraft_role_id),
-                        client=SimpleNamespace(config=config),
+            for unauthorized_member in (
+                make_member(),
+                make_member(config.minecraft_role_id),
+            ):
+                with self.assertRaises(ManagementPermissionError):
+                    await predicate(
+                        SimpleNamespace(
+                            user=unauthorized_member,
+                            client=SimpleNamespace(config=config),
+                        )
                     )
-                )
 
     async def test_office_conditional_rename_is_unchanged(self):
         config = make_config(Path("unused.db"))
