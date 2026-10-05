@@ -11,7 +11,7 @@ from utils.permissions import ManagementPermissionError
 
 
 LOGGER = logging.getLogger(__name__)
-EXTENSIONS = ("cogs.office", "cogs.congressus", "cogs.minecraft")
+EXTENSIONS = ("cogs.office", "cogs.congressus", "cogs.minecraft", "cogs.realtime")
 
 
 class RealtimeBot(commands.Bot):

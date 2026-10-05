@@ -1,6 +1,6 @@
 # Realtime Discord bot
 
-An asynchronous `discord.py` bot for the Realtime student association. It provides office-status controls, persistent Congressus membership and Minecraft-account registration, and Minecraft management through the internal Gaming VPS API.
+An asynchronous `discord.py` bot for the Realtime student association. It provides office-status controls, a reusable association welcome message, persistent Congressus membership and Minecraft-account registration, and Minecraft management through the internal Gaming VPS API.
 
 ## Project structure
 
@@ -35,6 +35,10 @@ Invite the Discord bot with the `bot` and `applications.commands` scopes. Give i
 | `OFFICE_CONTROL_CHANNEL_ID` | yes | Text channel where office buttons are posted |
 | `OFFICE_MANAGER_ROLE_ID` | yes | Role allowed to use office buttons |
 | `BOARD_ROLE_ID` | yes | Board role allowed to manage Office and Minecraft |
+| `RECLAMETIME_CHANNEL_ID` | no | Channel mentioned for association activities in the welcome message |
+| `CAREERTIME_CHANNEL_ID` | no | Channel mentioned for company and career activities in the welcome message |
+| `COMMISSION_CHANNEL_ID` | no | Channel mentioned for committee work in the welcome message |
+| `MINECRAFT_CHANNEL_ID` | no | Channel mentioned for Minecraft onboarding in the welcome message |
 | `MINECRAFT_MANAGER_ROLE_ID` | yes | Role allowed to use Minecraft management commands |
 | `MINECRAFT_ROLE_ID` | yes | Role assigned after active Congressus membership validation; grants no management access |
 | `CONGRESSUS_CLIENT_ID` | yes | Congressus OAuth client identifier |
@@ -51,6 +55,8 @@ The callback server listens only on `127.0.0.1:8090`. The public `CONGRESSUS_RED
 ## Permissions
 
 Members with `BOARD_ROLE_ID` may manage both Office and Minecraft. `OFFICE_MANAGER_ROLE_ID` remains an Office-only role for backwards compatibility. `MINECRAFT_MANAGER_ROLE_ID` is Minecraft-only. Discord Administrators always pass every management check.
+
+Only `BOARD_ROLE_ID` and Discord Administrators can use `/realtime setup welkom`. It posts the public welcome message in the current channel, or updates the bot's existing marked welcome message among the 100 most recent messages. The four optional channel IDs produce real Discord mentions; readable channel-name fallbacks are used when they are omitted. The bot never posts this message automatically.
 
 `/minecraft aanmelden` is available in the configured guild and guides members through Congressus verification, a private Discord prompt, and a Minecraft username modal. Congressus validation assigns `MINECRAFT_ROLE_ID` only after the account link is stored. `status` and `players` remain available to all server members. `MINECRAFT_ROLE_ID` is deliberately not consulted by any management check. Button and modal interactions are bound to the initiating Discord user.
 

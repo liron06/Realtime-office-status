@@ -28,6 +28,19 @@ def _required_id(name: str) -> int:
     return parsed
 
 
+def _optional_id(name: str) -> int | None:
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise ConfigurationError(f"{name} must be a Discord ID") from error
+    if parsed <= 0:
+        raise ConfigurationError(f"{name} must be a positive Discord ID")
+    return parsed
+
+
 def _required_https_url(name: str) -> str:
     value = _required(name)
     parsed = urlparse(value)
@@ -85,6 +98,10 @@ class Config:
     minecraft_api_token: str
     minecraft_server_host: str
     database_path: Path = Path("data/realtime.db")
+    reclametime_channel_id: int | None = None
+    careertime_channel_id: int | None = None
+    commission_channel_id: int | None = None
+    minecraft_channel_id: int | None = None
 
     def __post_init__(self) -> None:
         if self.minecraft_role_id in {
@@ -116,4 +133,8 @@ class Config:
             minecraft_api_token=_required("MINECRAFT_API_TOKEN"),
             minecraft_server_host=_required("MINECRAFT_SERVER_HOST"),
             database_path=_database_path(),
+            reclametime_channel_id=_optional_id("RECLAMETIME_CHANNEL_ID"),
+            careertime_channel_id=_optional_id("CAREERTIME_CHANNEL_ID"),
+            commission_channel_id=_optional_id("COMMISSION_CHANNEL_ID"),
+            minecraft_channel_id=_optional_id("MINECRAFT_CHANNEL_ID"),
         )

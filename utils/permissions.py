@@ -6,8 +6,8 @@ from discord import app_commands
 
 
 class ManagementPermissionError(app_commands.CheckFailure):
-    def __init__(self, area: str) -> None:
-        super().__init__(f"You do not have permission to manage {area}.")
+    def __init__(self, area: str, *, message: str | None = None) -> None:
+        super().__init__(message or f"You do not have permission to manage {area}.")
 
 
 def has_role(interaction: discord.Interaction, role_id: int) -> bool:
@@ -35,5 +35,18 @@ def minecraft_manager_only() -> Callable[[Any], Any]:
         ):
             return True
         raise ManagementPermissionError("Minecraft")
+
+    return app_commands.check(predicate)
+
+
+def board_only() -> Callable[[Any], Any]:
+    async def predicate(interaction: discord.Interaction) -> bool:
+        config = interaction.client.config
+        if has_management_permission(interaction, config.board_role_id):
+            return True
+        raise ManagementPermissionError(
+            "Realtime-instellingen",
+            message="Je hebt geen toestemming om Realtime-berichten te beheren.",
+        )
 
     return app_commands.check(predicate)
