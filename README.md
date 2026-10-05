@@ -43,6 +43,7 @@ Invite the Discord bot with the `bot` and `applications.commands` scopes. Give i
 | `CONGRESSUS_REDIRECT_URI` | yes | Public OAuth callback URL registered with Congressus |
 | `MINECRAFT_API_URL` | yes | Internal Gaming VPS API URL, normally `http://10.77.0.2:8081` |
 | `MINECRAFT_API_TOKEN` | yes | Bearer token for the Gaming VPS API |
+| `MINECRAFT_SERVER_HOST` | yes | Public Minecraft hostname shown to members |
 | `DATABASE_PATH` | no | SQLite path; defaults to `data/realtime.db` |
 
 The callback server listens only on `127.0.0.1:8090`. The public `CONGRESSUS_REDIRECT_URI` must therefore be forwarded by the existing HTTPS reverse proxy to `http://127.0.0.1:8090/congressus/callback`. Configure the proxy not to log callback query strings because they contain short-lived OAuth credentials. The Minecraft API token must exist only in the production environment. `.env` is excluded by `.gitignore`.
@@ -51,11 +52,14 @@ The callback server listens only on `127.0.0.1:8090`. The public `CONGRESSUS_RED
 
 Members with `BOARD_ROLE_ID` may manage both Office and Minecraft. `OFFICE_MANAGER_ROLE_ID` remains an Office-only role for backwards compatibility. `MINECRAFT_MANAGER_ROLE_ID` is Minecraft-only. Discord Administrators always pass every management check.
 
-`/minecraft validate` is available in the configured guild and assigns `MINECRAFT_ROLE_ID` only after Congressus reports an active membership and the account link is stored. `/minecraft register` additionally requires that persisted validation and the role. `status` and `players` remain available to all server members. `MINECRAFT_ROLE_ID` is deliberately not consulted by any management check. Button authorization is checked in the callback itself; channel visibility is not treated as security.
+`/minecraft aanmelden` is available in the configured guild and guides members through Congressus verification, a private Discord prompt, and a Minecraft username modal. Congressus validation assigns `MINECRAFT_ROLE_ID` only after the account link is stored. `status` and `players` remain available to all server members. `MINECRAFT_ROLE_ID` is deliberately not consulted by any management check. Button and modal interactions are bound to the initiating Discord user.
+
+After OAuth succeeds, the bot sends the member a DM containing the Minecraft-account button. This avoids depending on the lifetime of the original ephemeral interaction. If DMs are unavailable or the button expires, rerunning `/minecraft aanmelden` resumes from the persisted state without repeating completed steps.
 
 ## Minecraft account commands
 
-- `/minecraft register <username>` stores the validated member's first Minecraft Java username and ensures it is whitelisted. If the API is temporarily unavailable, the stored ownership remains and a manager can retry synchronization.
+- `/minecraft aanmelden` is the primary member flow. It skips completed steps and shows the configured server address to fully registered members.
+- `/minecraft validate` and `/minecraft register <username>` remain available as legacy entry points and reuse the same onboarding and registration logic.
 - `/minecraft whitelist show <member>` shows the stored account link to Minecraft managers.
 - `/minecraft whitelist reset <member>` removes the current server whitelist entry before clearing the stored username. Congressus verification and the Discord role remain.
 - `/minecraft whitelist set <member> <username>` safely replaces a validated member's username, including rollback when adding the new whitelist entry fails.

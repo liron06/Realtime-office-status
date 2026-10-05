@@ -83,6 +83,7 @@ class Config:
     congressus_redirect_uri: str
     minecraft_api_url: str
     minecraft_api_token: str
+    minecraft_server_host: str
     database_path: Path = Path("data/realtime.db")
 
     def __post_init__(self) -> None:
@@ -113,5 +114,6 @@ class Config:
             congressus_redirect_uri=_required_https_url("CONGRESSUS_REDIRECT_URI"),
             minecraft_api_url=_required_api_url("MINECRAFT_API_URL"),
             minecraft_api_token=_required("MINECRAFT_API_TOKEN"),
+            minecraft_server_host=_required("MINECRAFT_SERVER_HOST"),
             database_path=_database_path(),
         )

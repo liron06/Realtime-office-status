@@ -2,6 +2,7 @@ import asyncio
 import logging
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -50,6 +51,12 @@ class CongressusService:
         self._state_lock = asyncio.Lock()
         self._session: aiohttp.ClientSession | None = None
         self._runner: web.AppRunner | None = None
+        self._verified_callback: Callable[[int], Awaitable[None]] | None = None
+
+    def set_verified_callback(
+        self, callback: Callable[[int], Awaitable[None]] | None
+    ) -> None:
+        self._verified_callback = callback
 
     async def start(self) -> None:
         if self._runner is not None:
@@ -133,8 +140,8 @@ class CongressusService:
         if state_error is not None:
             LOGGER.warning("Rejected Congressus callback with %s state", state_error)
             return self._html_response(
-                "Validation failed",
-                "This validation link is missing, invalid, expired, or has already been used.",
+                "Verificatie mislukt",
+                "Deze verificatielink ontbreekt, is ongeldig, verlopen of al gebruikt.",
                 status=400,
             )
 
@@ -145,8 +152,8 @@ class CongressusService:
                 pending.discord_user_id,
             )
             return self._html_response(
-                "Validation cancelled",
-                "Congressus did not approve the validation request. You can return to Discord and try again.",
+                "Verificatie geannuleerd",
+                "Congressus heeft de verificatie niet goedgekeurd. Ga terug naar Discord om het opnieuw te proberen.",
                 status=400,
             )
 
@@ -157,8 +164,8 @@ class CongressusService:
                 pending.discord_user_id,
             )
             return self._html_response(
-                "Validation failed",
-                "Congressus did not return an authorization code.",
+                "Verificatie mislukt",
+                "Congressus gaf geen geldige autorisatie terug.",
                 status=400,
             )
 
@@ -172,8 +179,8 @@ class CongressusService:
                 error,
             )
             return self._html_response(
-                "Validation failed",
-                "Congressus could not complete the validation. Please return to Discord and try again later.",
+                "Verificatie mislukt",
+                "Congressus kon de verificatie niet afronden. Probeer het later opnieuw via Discord.",
                 status=502,
             )
 
@@ -183,8 +190,8 @@ class CongressusService:
                 pending.discord_user_id,
             )
             return self._html_response(
-                "Membership not active",
-                "An active Realtime membership is required for Minecraft access.",
+                "Lidmaatschap niet actief",
+                "Voor Minecraft-toegang is een actief Realtime-lidmaatschap nodig.",
                 status=403,
             )
 
@@ -195,8 +202,8 @@ class CongressusService:
                 pending.discord_user_id,
             )
             return self._html_response(
-                "Validation failed",
-                "Congressus returned incomplete membership information. Please try again later.",
+                "Verificatie mislukt",
+                "Congressus gaf onvolledige lidmaatschapsgegevens terug. Probeer het later opnieuw.",
                 status=502,
             )
 
@@ -213,8 +220,8 @@ class CongressusService:
                 pending.discord_user_id,
             )
             return self._html_response(
-                "Account already linked",
-                "This Discord account is already linked to another Congressus account. Contact an administrator if this is unexpected.",
+                "Account al gekoppeld",
+                "Dit Discord-account is al gekoppeld aan een ander Congressus-account. Neem contact op met een beheerder als dit niet klopt.",
                 status=409,
             )
         except CongressusAccountAlreadyLinked:
@@ -223,8 +230,8 @@ class CongressusService:
                 pending.discord_user_id,
             )
             return self._html_response(
-                "Account already linked",
-                "This Congressus account is already linked to another Discord account. Contact an administrator if this is unexpected.",
+                "Account al gekoppeld",
+                "Dit Congressus-account is al gekoppeld aan een ander Discord-account. Neem contact op met een beheerder als dit niet klopt.",
                 status=409,
             )
         except StorageError as error:
@@ -234,24 +241,34 @@ class CongressusService:
                 type(error).__name__,
             )
             return self._html_response(
-                "Validation failed",
-                "Your membership was verified, but the account link could not be saved. Please try again later.",
+                "Verificatie mislukt",
+                "Je lidmaatschap is geverifieerd, maar de accountkoppeling kon niet worden opgeslagen. Probeer het later opnieuw.",
                 status=500,
             )
 
         if not await self._assign_validated_role(pending.discord_user_id):
             return self._html_response(
-                "Validation failed",
-                "Your membership was verified, but the Discord role could not be assigned. Please contact an administrator.",
+                "Verificatie mislukt",
+                "Je lidmaatschap is geverifieerd, maar de Discord-rol kon niet worden toegewezen. Neem contact op met een beheerder.",
                 status=500,
             )
+
+        if self._verified_callback is not None:
+            try:
+                await self._verified_callback(pending.discord_user_id)
+            except Exception as error:
+                LOGGER.error(
+                    "Could not send Minecraft onboarding prompt to Discord user %d (%s)",
+                    pending.discord_user_id,
+                    type(error).__name__,
+                )
 
         LOGGER.info(
             "Congressus membership validated for Discord user %d", pending.discord_user_id
         )
         return self._html_response(
-            "Validation successful",
-            "Your active Realtime membership was verified and your Discord role was assigned. You can close this page.",
+            "Verificatie geslaagd",
+            "Je Realtime-lidmaatschap is geverifieerd. Ga terug naar Discord om je Minecraft-account te koppelen.",
         )
 
     async def _exchange_code(self, code: str) -> str:
@@ -350,7 +367,7 @@ class CongressusService:
     @staticmethod
     def _html_response(title: str, message: str, status: int = 200) -> web.Response:
         html = f"""<!doctype html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
