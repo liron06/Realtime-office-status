@@ -62,8 +62,7 @@ def build_welcome_embed(config: Config) -> discord.Embed:
         value=(
             "Realtime heeft een eigen Minecraft-server voor leden.\n\n"
             f"Ga naar {minecraft} en gebruik `/minecraft aanmelden` om je "
-            "lidmaatschap te verifiëren en automatisch toegang te krijgen.\n\n"
-            f"**Server**\n`{config.minecraft_server_host}`"
+            "lidmaatschap te verifiëren en automatisch toegang te krijgen."
         ),
         inline=False,
     )
